@@ -1,70 +1,31 @@
-"""
-Backend для QIP Mini App
-Проксирует запросы к Claude API, хранит историю разговоров в памяти.
-
-Деплой на Render.com:
-  1. Создай новый Web Service
-  2. Укажи Start Command: gunicorn app:app
-  3. Добавь переменные окружения:
-     ANTHROPIC_API_KEY = sk-ant-...
-     SYSTEM_PROMPT     = (твой system prompt, можно очень длинный)
-"""
-
 import os
-import json
+import requests
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import anthropic
 
 app = Flask(__name__)
-CORS(app)  # Разрешаем запросы с GitHub Pages
+CORS(app)
 
-# ─── Клиент Anthropic ───────────────────────────────────────────────
-client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-
-# ─── System prompt ──────────────────────────────────────────────────
-# Берётся из переменной окружения SYSTEM_PROMPT
-# Можно вставить хоть 150k слов — передаётся в каждом запросе
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 SYSTEM_PROMPT = os.environ.get("SYSTEM_PROMPT", "Ты дружелюбный ассистент.")
 
-# ─── Хранилище истории (in-memory) ──────────────────────────────────
-# Структура: { conversation_id: { messages: [...], last_active: datetime } }
 conversations = {}
-
-# Максимальное количество сообщений в истории (туда-обратно = 2 на обмен)
-MAX_HISTORY_MESSAGES = 40
-
-# Удалять неактивные разговоры через N часов
-SESSION_TTL_HOURS = 24
+MAX_HISTORY = 40
+SESSION_TTL = 24
 
 
-def get_or_create_conversation(conv_id: str) -> list:
-    """Возвращает историю сообщений для данного conversation_id."""
+def get_messages(conv_id):
     now = datetime.utcnow()
-
-    # Чистим старые сессии
-    expired = [
-        k for k, v in conversations.items()
-        if now - v["last_active"] > timedelta(hours=SESSION_TTL_HOURS)
-    ]
+    expired = [k for k, v in conversations.items()
+               if now - v["last_active"] > timedelta(hours=SESSION_TTL)]
     for k in expired:
         del conversations[k]
-
     if conv_id not in conversations:
         conversations[conv_id] = {"messages": [], "last_active": now}
     else:
         conversations[conv_id]["last_active"] = now
-
     return conversations[conv_id]["messages"]
-
-
-def trim_history(messages: list) -> list:
-    """Обрезаем историю если она слишком длинная."""
-    if len(messages) > MAX_HISTORY_MESSAGES:
-        # Оставляем первые 2 (начало разговора) + последние N
-        return messages[:2] + messages[-(MAX_HISTORY_MESSAGES - 2):]
-    return messages
 
 
 @app.route("/", methods=["GET"])
@@ -77,73 +38,59 @@ def chat():
     try:
         data = request.get_json()
         if not data:
-            return jsonify({"error": "No JSON body"}), 400
+            return jsonify({"error": "No JSON"}), 400
 
         conv_id = data.get("conversation_id", "default")
         user_message = data.get("message", "").strip()
-        user_name = data.get("user_name", "Пользователь")
 
         if not user_message:
             return jsonify({"error": "Empty message"}), 400
 
-        # Получаем историю
-        messages = get_or_create_conversation(conv_id)
+        messages = get_messages(conv_id)
+        messages.append({"role": "user", "content": user_message})
 
-        # Добавляем сообщение пользователя
-        messages.append({
-            "role": "user",
-            "content": user_message
-        })
+        if len(messages) > MAX_HISTORY:
+            messages = messages[-MAX_HISTORY:]
+            conversations[conv_id]["messages"] = messages
 
-        # Обрезаем если нужно
-        messages = trim_history(messages)
-        conversations[conv_id]["messages"] = messages
-
-        # Запрос к Claude
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2048,
-            system=SYSTEM_PROMPT,
-            messages=messages
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-sonnet-4-20250514",
+                "max_tokens": 2048,
+                "system": SYSTEM_PROMPT,
+                "messages": messages,
+            },
+            timeout=60,
         )
 
-        reply = response.content[0].text
+        resp.raise_for_status()
+        reply = resp.json()["content"][0]["text"]
 
-        # Добавляем ответ ассистента в историю
-        messages.append({
-            "role": "assistant",
-            "content": reply
-        })
+        messages.append({"role": "assistant", "content": reply})
 
-        return jsonify({
-            "reply": reply,
-            "conversation_id": conv_id,
-            "message_count": len(messages)
-        })
+        return jsonify({"reply": reply, "conversation_id": conv_id})
 
-    except anthropic.APIStatusError as e:
-        app.logger.error(f"Anthropic API error: {e}")
-        return jsonify({"error": f"API error: {e.status_code}"}), 502
-
+    except requests.HTTPError as e:
+        app.logger.error(f"Anthropic HTTP error: {e}")
+        return jsonify({"error": str(e)}), 502
     except Exception as e:
-        app.logger.error(f"Unexpected error: {e}")
-        return jsonify({"error": "Internal server error"}), 500
+        app.logger.error(f"Error: {e}")
+        return jsonify({"error": "Internal error"}), 500
 
 
 @app.route("/clear", methods=["POST"])
 def clear():
-    """Очищает историю разговора."""
-    try:
-        data = request.get_json()
-        conv_id = data.get("conversation_id", "default") if data else "default"
-
-        if conv_id in conversations:
-            conversations[conv_id]["messages"] = []
-
-        return jsonify({"status": "cleared", "conversation_id": conv_id})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    data = request.get_json()
+    conv_id = data.get("conversation_id", "default") if data else "default"
+    if conv_id in conversations:
+        conversations[conv_id]["messages"] = []
+    return jsonify({"status": "cleared"})
 
 
 if __name__ == "__main__":
