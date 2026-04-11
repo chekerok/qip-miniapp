@@ -10,7 +10,7 @@ CORS(app)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 SYSTEM_PROMPT = os.environ.get("SYSTEM_PROMPT", "Ты дружелюбный ассистент.")
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemma-3-1b-it:generateContent"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
 conversations = {}
 MAX_HISTORY = 40
