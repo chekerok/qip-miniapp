@@ -54,7 +54,7 @@ def chat():
             conversations[conv_id]["messages"] = messages
 
         resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
+    "https://aiprime.store/v1/messages",
             headers={
                 "x-api-key": ANTHROPIC_API_KEY,
                 "anthropic-version": "2023-06-01",
