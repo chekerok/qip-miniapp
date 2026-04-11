@@ -79,7 +79,7 @@ def chat():
                 "system": SYSTEM_PROMPT,
                 "messages": messages,
             },
-            timeout=60,
+            timeout=120,
         )
 
         resp.raise_for_status()
