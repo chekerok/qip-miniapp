@@ -5,12 +5,11 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 SYSTEM_PROMPT = os.environ.get("SYSTEM_PROMPT", "Ты дружелюбный ассистент.")
-
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
+API_URL = "https://aiprime.store/v1/messages"
 
 conversations = {}
 MAX_HISTORY = 40
@@ -30,13 +29,24 @@ def get_messages(conv_id):
     return conversations[conv_id]["messages"]
 
 
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    return response
+
+
 @app.route("/", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "service": "QIP Mini App Backend (Gemini)"})
+    return jsonify({"status": "ok", "service": "QIP Mini App Backend"})
 
 
-@app.route("/chat", methods=["POST"])
+@app.route("/chat", methods=["POST", "OPTIONS"])
 def chat():
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+
     try:
         data = request.get_json()
         if not data:
@@ -49,50 +59,46 @@ def chat():
             return jsonify({"error": "Empty message"}), 400
 
         messages = get_messages(conv_id)
-        messages.append({"role": "user", "parts": [{"text": user_message}]})
+        messages.append({"role": "user", "content": user_message})
 
         if len(messages) > MAX_HISTORY:
             messages = messages[-MAX_HISTORY:]
             conversations[conv_id]["messages"] = messages
 
-        payload = {
-            "system_instruction": {
-                "parts": [{"text": SYSTEM_PROMPT}]
-            },
-            "contents": messages,
-            "generationConfig": {
-                "maxOutputTokens": 2048,
-                "temperature": 0.9,
-            }
-        }
-
         resp = requests.post(
-            GEMINI_URL,
-            headers={"Content-Type": "application/json"},
-            params={"key": GEMINI_API_KEY},
-            json=payload,
+            API_URL,
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-sonnet-4-20250514",
+                "max_tokens": 2048,
+                "system": SYSTEM_PROMPT,
+                "messages": messages,
+            },
             timeout=60,
         )
 
         resp.raise_for_status()
-        result = resp.json()
-
-        reply = result["candidates"][0]["content"]["parts"][0]["text"]
-
-        messages.append({"role": "model", "parts": [{"text": reply}]})
+        reply = resp.json()["content"][0]["text"]
+        messages.append({"role": "assistant", "content": reply})
 
         return jsonify({"reply": reply, "conversation_id": conv_id})
 
     except requests.HTTPError as e:
-        app.logger.error(f"Gemini HTTP error: {e.response.text}")
+        app.logger.error(f"API error: {e.response.text if e.response else str(e)}")
         return jsonify({"error": str(e)}), 502
     except Exception as e:
         app.logger.error(f"Error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/clear", methods=["POST"])
+@app.route("/clear", methods=["POST", "OPTIONS"])
 def clear():
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
     data = request.get_json()
     conv_id = data.get("conversation_id", "default") if data else "default"
     if conv_id in conversations:
