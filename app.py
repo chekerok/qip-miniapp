@@ -9,7 +9,7 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 SYSTEM_PROMPT = os.environ.get("SYSTEM_PROMPT", "Ты дружелюбный ассистент.")
-API_URL = "https://aiprime.store"
+API_URL = "https://aiprime.store/api/v1/messages"
 
 conversations = {}
 MAX_HISTORY = 40
