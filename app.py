@@ -67,10 +67,11 @@ def chat():
 
         resp = requests.post(
             API_URL,
-            headers={
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
+        headers={
+                 "Authorization": "Bearer " + ANTHROPIC_API_KEY,
+                 "x-api-key": ANTHROPIC_API_KEY,
+                 "anthropic-version": "2023-06-01",
+                 "content-type": "application/json",
             },
             json={
                 "model": "claude-sonnet-4-20250514",
