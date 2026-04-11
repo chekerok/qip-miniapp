@@ -32,9 +32,16 @@ def get_messages(conv_id):
 def health():
     return jsonify({"status": "ok", "service": "QIP Mini App Backend"})
 
-
-@app.route("/chat", methods=["POST"])
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    return response
+@app.route("/chat", methods=["POST", "OPTIONS"])
 def chat():
+    if request.method == 'OPTIONS':
+    return jsonify({}), 200
     try:
         data = request.get_json()
         if not data:
