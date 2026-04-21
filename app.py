@@ -9,7 +9,7 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 
 API_KEY = os.environ.get("API_KEY", "")
 SYSTEM_PROMPT = os.environ.get("SYSTEM_PROMPT", "Ты дружелюбный ассистент.")
-API_URL = "https://api.aiguoguo199.com/v1"
+API_URL = "https://api.aiguoguo199.com/v1/chat/completions"
 MODEL = "claude-opus-4-6"
 
 conversations = {}
